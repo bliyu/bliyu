@@ -18,7 +18,7 @@
 
 ## 💡 About Me
 
-💻 I build **real-world applications** — not just assignments  
+💻 I build **real world applications** not just assignments  
 📱 Passionate about **mobile development with SwiftUI**  
 🌐 Experienced in **full-stack development** with modern web technologies  
 🤖 Exploring **machine learning, data science, and AI systems**  
@@ -35,7 +35,7 @@
 
 - Real-time messaging using **Node.js + Socket.io**
 - Multi-room chat and private messaging
-- Built with a full client-server architecture
+- Built with a full client server architecture
 
 ---
 
@@ -160,7 +160,7 @@
 
 ## ⚡ Fun Fact
 
-I don’t just learn code — I **build products from scratch and make them real** 💪✨
+I don’t just learn code, I **build products from scratch and make them real** 💪✨
 
 ---
 
