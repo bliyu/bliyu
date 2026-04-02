@@ -105,6 +105,7 @@
 
 - **C#**
 - **Java**
+- **JavaScript**
 - **SQL / MySQL**
 - **PHP**
 - **ASP.NET Core MVC**
@@ -117,6 +118,8 @@
 - **Angular**
 - **Linux**
 - **Scrum / Agile**
+-**python**
+  
 
 ---
 
