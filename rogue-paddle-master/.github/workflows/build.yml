@@ -1,0 +1,110 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (example: 0.7.0)"
+        required: true
+      notes:
+        description: "Release notes"
+        required: false
+      build_windows:
+        description: "Build Windows"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  PRODUCT_NAME: RoguePaddle
+  OUTPUT_FOLDER: ./build
+  LOVE_PACKAGE: game.love
+
+jobs:
+  build-love-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build .love file
+        run: |
+          cd src
+          zip -9 -r ../game.love .
+          cd ..
+
+      - name: Upload .love package
+        uses: actions/upload-artifact@v4
+        with:
+          name: love-package
+          path: ${{ env.LOVE_PACKAGE }}
+
+  build-windows:
+    needs: build-love-package
+    if: ${{ github.event.inputs.build_windows == 'true' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download .love package
+        uses: actions/download-artifact@v4
+        with:
+          name: love-package
+
+      - name: Write build metadata
+        run: |
+          echo "return 'release'" > src/build_info.lua
+
+      - name: Build Windows Package
+        id: build
+        uses: love-actions/love-actions-windows@v2
+        with:
+          love-ref: "11.5"
+          love-package: "./game.love"
+          product-name: ${{ env.PRODUCT_NAME }}
+          output-folder: ${{ env.OUTPUT_FOLDER }}
+          app-id: ${{ secrets.APP_ID }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: |
+            ${{ env.OUTPUT_FOLDER }}/${{ env.PRODUCT_NAME }}_x86.zip
+            ${{ env.OUTPUT_FOLDER }}/${{ env.PRODUCT_NAME }}_x64.zip
+            ${{ env.OUTPUT_FOLDER }}/${{ env.PRODUCT_NAME }}_installer.exe
+
+  release:
+    needs: [build-windows]
+    if: ${{ always() && !cancelled() && (needs.build-windows.result == 'success' || needs.build-android.result == 'success') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows artifacts
+        if: ${{ github.event.inputs.build_windows == 'true' && needs.build-windows.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-builds
+          path: ./windows
+
+      - name: Create release directory
+        run: mkdir -p ./release
+
+      - name: Rename Windows files
+        if: ${{ github.event.inputs.build_windows == 'true' && needs.build-windows.result == 'success' }}
+        run: |
+          mv ./windows/${{ env.PRODUCT_NAME }}_x86.zip ./release/${{ env.PRODUCT_NAME }}_x86_Windows_${{ github.event.inputs.version }}.zip
+          mv ./windows/${{ env.PRODUCT_NAME }}_x64.zip ./release/${{ env.PRODUCT_NAME }}_x64_Windows_${{ github.event.inputs.version }}.zip
+          mv ./windows/${{ env.PRODUCT_NAME }}_installer.exe ./release/${{ env.PRODUCT_NAME }}_installer_Windows_${{ github.event.inputs.version }}.exe
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ github.event.inputs.version }}"
+          name: "Rogue Paddle ${{ github.event.inputs.version }}"
+          body: "${{ github.event.inputs.notes }}"
+          files: ./release/*

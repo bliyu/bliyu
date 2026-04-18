@@ -1,0 +1,335 @@
+local BORDER_COLOR = Color.REGULAR0
+local BORDER_THICKNESS = 0.5
+
+-- types
+
+---@alias BrickLayout integer[][]
+---@alias BrickRow Brick[]
+---@alias BrickGrid BrickRow[]
+---@alias BrickVariants BrickVariant[]
+
+-- events
+
+---@class BrickEvent
+---@field bricks BrickManager
+---@field cancel boolean
+local BrickEvent = {}
+BrickEvent.__index = BrickEvent
+
+---@param bricks BrickManager
+function BrickEvent:new(bricks)
+  return setmetatable({
+    bricks = bricks,
+    cancel = false,
+  }, BrickEvent)
+end
+
+---@class BrickEvents
+--- triggers when a new brick is being generated
+---@field onGenerate? fun(brick: Brick)
+--- triggers when a brick is being removed
+---@field onRemove? fun(e: BrickEvent, brick: Brick)
+--- triggers when there are no bricks left
+---@field onReset? fun(e: BrickEvent)
+
+---@class BrickVariant
+
+-- meta
+
+---@class Brick
+---@field x integer
+---@field y integer
+---@field idx integer
+---@field box Box
+---@field color? Color
+---@field variant BrickVariant
+
+---@class BrickGridData
+---@field grid BrickGrid
+---@field cols integer
+---@field rows integer
+---@field count integer
+---@field timer Timer
+---@field top_offset number
+
+-- manager
+
+---@class BrickManager
+---@field _data BrickGridData
+---@field state BrickManagerState
+local BrickManager = {}
+BrickManager.__index = BrickManager
+
+---@class BrickManagerState : BrickEvents
+---@field layout BrickLayout
+---@field viewTransitionSpeed? number
+---@field variants? BrickVariants
+---@field colors? Color[]
+---@field top_offset? number
+
+---@param state BrickManagerState
+---@return BrickManager
+function BrickManager.new(state)
+  return setmetatable({
+    _data = BrickManager.generate(state),
+    state = state,
+  }, BrickManager)
+end
+
+---@param opts BrickManagerState
+---@return BrickGridData
+function BrickManager.generate(opts)
+  local grid = {}
+  local rows = #opts.layout
+  local cols = #opts.layout[1]
+  local count = 0
+
+  for y, row in ipairs(opts.layout) do
+    assert(#row == cols, ('row %d width mismatch (expected %d, got %d)'):format(y, cols, #row))
+  end
+
+  local size = S.camera.box.size / Vec2.new(cols, rows)
+  local color_y = 1
+  local has_variants = opts.variants and #opts.variants > 0
+  local top_offset = opts.top_offset or 0
+
+  for y, y_rows in ipairs(opts.layout) do
+    grid[y] = {}
+    local row_has_brick = false
+
+    for x, idx in ipairs(y_rows) do
+      if idx ~= 0 then
+        row_has_brick = true
+
+        ---@type Brick
+        local brick = {
+          x = x,
+          y = y,
+          idx = idx,
+          color = opts.colors[color_y],
+          variant = has_variants and opts.variants[love.math.random(#opts.variants)] or nil,
+          box = Box.new(
+            Vec2.new((x - 1) * size.x, ((y - 1) * size.y - S.camera.box.h + top_offset)),
+            size
+          ),
+        }
+
+        opts.onGenerate(brick)
+        grid[y][x] = brick
+        count = count + 1
+      end
+    end
+
+    if row_has_brick then
+      color_y = color_y + 1
+    end
+  end
+
+  return {
+    grid = grid,
+    cols = cols,
+    rows = rows,
+    count = count,
+    timer = Timer.new(opts.viewTransitionSpeed or 0.5),
+    top_offset = top_offset,
+  }
+end
+
+function BrickManager:draw()
+  local timer = self._data.timer
+  if not timer.finished then
+    timer:update(love.timer.getDelta())
+
+    for y, row in ipairs(self._data.grid) do
+      for _, brick in pairs(row) do
+        local to = (y - 1) * brick.box.h
+        brick.box.y =
+          math.lerp(to - S.camera.box.h + self._data.top_offset, to + self._data.top_offset, timer.alpha)
+      end
+    end
+  end
+
+  love.graphics.setLineWidth(BORDER_THICKNESS)
+  for _, row in ipairs(self._data.grid) do
+    for _, brick in pairs(row) do
+      love.graphics.setColor(Color.SHADOW[1], Color.SHADOW[2], Color.SHADOW[3], 0.65)
+      love.graphics.rectangle(
+        'fill',
+        brick.box.pos.x + 1,
+        brick.box.pos.y + 2,
+        brick.box.size.x,
+        brick.box.size.y,
+        3,
+        3
+      )
+
+      love.graphics.setColor(brick.color or Color.RESET)
+      love.graphics.rectangle(
+        'fill',
+        brick.box.pos.x,
+        brick.box.pos.y,
+        brick.box.size.x,
+        brick.box.size.y,
+        3,
+        3
+      )
+
+      love.graphics.setColor(Color.BRIGHT7[1], Color.BRIGHT7[2], Color.BRIGHT7[3], 0.18)
+      love.graphics.rectangle(
+        'fill',
+        brick.box.pos.x + 1,
+        brick.box.pos.y + 1,
+        brick.box.size.x - 2,
+        2,
+        2,
+        2
+      )
+      love.graphics.setColor(BORDER_COLOR)
+      love.graphics.rectangle(
+        'line',
+        brick.box.pos.x,
+        brick.box.pos.y,
+        brick.box.size.x,
+        brick.box.size.y,
+        3,
+        3
+      )
+    end
+  end
+end
+
+---@param grid_x integer
+---@param grid_y integer
+---@return Brick? brick
+function BrickManager:gridAt(grid_x, grid_y)
+  return self._data.grid[grid_y] and self._data.grid[grid_y][grid_x]
+end
+
+---@param world_x number
+---@param world_y number
+---@return integer grid_x
+---@return integer grid_y
+function BrickManager:gridCellCoords(world_x, world_y)
+  local cell_w = S.camera.box.w / self._data.cols
+  local cell_h = S.camera.box.h / self._data.rows
+  local grid_x = math.floor(world_x / cell_w) + 1
+  local grid_y = math.floor((world_y - self._data.top_offset) / cell_h) + 1
+  return grid_x, grid_y
+end
+
+---@param world_x number
+---@param world_y number
+---@return Brick? brick
+function BrickManager:gridWorldAt(world_x, world_y)
+  local gx, gy = self:gridCellCoords(world_x, world_y)
+  return self:gridAt(gx, gy)
+end
+
+---@class CollisionResult
+---@field top? Brick
+---@field bottom? Brick
+---@field left? Brick
+---@field right? Brick
+
+---@param source Box
+---@return CollisionResult result
+function BrickManager:boxCollision(source)
+  if not self._data.timer.finished then
+    return {}
+  end
+
+  local x, y, w, h = source.pos.x, source.pos.y, source.size.x, source.size.y
+  return {
+    top = self:gridWorldAt(x + w * 0.5, y),
+    bottom = self:gridWorldAt(x + w * 0.5, y + h),
+    left = self:gridWorldAt(x, y + h * 0.5),
+    right = self:gridWorldAt(x + w, y + h * 0.5),
+  }
+end
+
+--- checks and applies collision logic to any moving box
+---@param source Box
+---@param velocity Vec2
+function BrickManager:removeOnCollision(source, velocity)
+  local col = self:boxCollision(source)
+  local hit = nil
+
+  if velocity.y < 0 and col.top then
+    hit = col.top
+  elseif velocity.y > 0 and col.bottom then
+    hit = col.bottom
+  elseif velocity.x < 0 and col.left then
+    hit = col.left
+  elseif velocity.x > 0 and col.right then
+    hit = col.right
+  end
+
+  if hit then
+    if hit == col.top or hit == col.bottom then
+      velocity.y = -velocity.y
+      source:clampOutsideY(hit.box, true, true)
+    end
+    if hit == col.left or hit == col.right then
+      velocity.x = -velocity.x
+      source:clampOutsideX(hit.box, true, true)
+    end
+
+    self:remove(hit)
+  end
+end
+
+---@param brick Brick
+function BrickManager:remove(brick)
+  if self._data.count == 1 then
+    self:reset()
+    return
+  else
+    local ev = BrickEvent:new(self)
+    if self.state.onRemove then
+      self.state.onRemove(ev, brick)
+    end
+
+    if ev.cancel then
+      return
+    end
+  end
+
+  self._data.grid[brick.y][brick.x] = nil
+  self._data.count = self._data.count - 1
+end
+
+---@return number
+function BrickManager:getCount()
+  return self._data.count
+end
+
+---@return number
+function BrickManager:getCols()
+  return self._data.cols
+end
+
+---@return number
+function BrickManager:getRows()
+  return self._data.rows
+end
+
+function BrickManager:reset()
+  local ev = BrickEvent:new(self)
+
+  if self.state.onReset then
+    self.state.onReset(ev)
+  end
+
+  if ev.cancel then
+    return
+  end
+
+  self._data = self.generate(self.state)
+end
+
+---@param layout BrickLayout
+function BrickManager:setLayout(layout)
+  self.state.layout = layout
+end
+
+return BrickManager
